@@ -26,5 +26,3 @@ Views here are my own, not my employer's.
 ## Elsewhere
 
 - [GitHub](https://github.com/erdincka)
-- [HPE Developer Community](https://developer.hpe.com/) — where some of this work
-  appears in a fuller, reviewed form

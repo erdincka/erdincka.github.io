@@ -1,7 +1,7 @@
 ---
 layout: post
 title: "Building an agentic AI stack on Kubernetes Agent Sandbox: what it's for and what it's like to use"
-date: 2026-08-29
+date: 2026-08-30
 summary: >-
   Prompt-based restrictions are a request, not a control. What it takes to move
   agent permissions into Kubernetes, and what running it actually teaches you.
