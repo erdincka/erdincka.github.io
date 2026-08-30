@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  {%- seo -%}
+  <link rel="stylesheet" href="{{ '/assets/css/style.css' | relative_url }}">
+  <link rel="alternate" type="application/atom+xml" title="{{ site.title }}" href="{{ '/feed.xml' | relative_url }}">
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+
+  <header class="site">
+    <a class="brand" href="{{ '/' | relative_url }}">{{ site.title }}</a>
+    <nav>
+      <a href="{{ '/' | relative_url }}">Writing</a>
+      <a href="{{ '/about/' | relative_url }}">About</a>
+      <a href="https://github.com/{{ site.github_username }}">GitHub</a>
+    </nav>
+  </header>
+
+  <main id="main">
+    {{ content }}
+  </main>
+
+  <footer class="site">
+    <p>&copy; {{ 'now' | date: "%Y" }} {{ site.author }}. Views are my own.</p>
+    <p><a href="{{ '/feed.xml' | relative_url }}">RSS</a></p>
+  </footer>
+</body>
+</html>

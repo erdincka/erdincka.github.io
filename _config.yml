@@ -1,0 +1,30 @@
+title: Erdinc Kaya
+tagline: Infrastructure, Kubernetes, and applied AI
+description: >-
+  Notes on running AI workloads on infrastructure you control — Kubernetes,
+  data platforms, and the operational details that decide whether a design
+  survives contact with a cluster.
+author: Erdinc Kaya
+url: "https://erdincka.github.io"
+baseurl: ""
+
+github_username: erdincka
+location: London, UK
+
+markdown: kramdown
+kramdown:
+  syntax_highlighter: rouge
+  input: GFM
+
+permalink: /:year/:month/:title/
+
+plugins:
+  - jekyll-feed
+  - jekyll-seo-tag
+  - jekyll-sitemap
+
+exclude:
+  - README.md
+  - Gemfile
+  - Gemfile.lock
+  - vendor

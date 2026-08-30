@@ -1,0 +1,24 @@
+---
+layout: default
+---
+<section class="intro">
+  <h1>{{ site.tagline }}</h1>
+  <p>{{ site.description }}</p>
+</section>
+
+<section class="posts">
+  {%- if site.posts.size > 0 %}
+  <ul class="postlist">
+    {%- for post in site.posts %}
+    <li>
+      <time datetime="{{ post.date | date_to_xmlschema }}">{{ post.date | date: "%b %Y" }}</time>
+      <a href="{{ post.url | relative_url }}">{{ post.title }}</a>
+      {%- if post.summary %}<p>{{ post.summary }}</p>{% endif %}
+    </li>
+    {%- endfor %}
+  </ul>
+  {%- else %}
+  <p class="empty">First post is on its way. In the meantime, the code is on
+    <a href="https://github.com/{{ site.github_username }}">GitHub</a>.</p>
+  {%- endif %}
+</section>
