@@ -6,6 +6,12 @@ summary: >-
   Prompt-based restrictions are a request, not a control. What it takes to move
   agent permissions into Kubernetes, and what running it actually teaches you.
 tags: [kubernetes, ai, agents, security]
+disclaimer: >-
+  I am not claiming any authority on this topic. This blog and the accompanying demo are both mostly written
+  by AI. I have reviewed the code and the blog for sure, yet you may still find errors or omissions.
+  First of all, I didn't aim to build a fully-featured production-grade solution, it is just a demo I've
+  put together to better understand the agent sandbox and how you can wrap enterprise security controls around it. You will not
+  see an extensive RAG pipeline, or complex agent logic, or any evaluation, guardrails or monitoring built around it (which you should consider).
 ---
 
 Sooner or later someone is going to ask your platform team to run AI agents in

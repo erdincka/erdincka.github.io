@@ -15,6 +15,13 @@ layout: default
     {%- if page.summary %}<p class="summary">{{ page.summary }}</p>{% endif %}
   </header>
 
+  {%- if page.disclaimer %}
+  <aside class="disclaimer" role="note" aria-label="Disclaimer">
+    <p class="disclaimer-label">Before you read this</p>
+    {{ page.disclaimer | markdownify }}
+  </aside>
+  {%- endif %}
+
   {{ content }}
 
   {%- if page.canonical_note %}
