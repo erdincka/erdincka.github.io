@@ -9,7 +9,7 @@ description: >-
 image: /assets/img/social-card.png
 ---
 
-> **Before you read this.** I am not claiming any authority on this topic. This blog and the accompanying demo are both mostly written by AI. I have reviewed the code and the blog for sure, yet you may still find errors or omissions. First of all, I didn't aim to build a fully-featured production-grade solution, it is just a demo I've put together to better understand the agent sandbox and how you can wrap enterprise security controls around it. You will not see an extensive RAG pipeline, or complex agent logic, or any evaluation, guardrails or monitoring built around it (which you should consider).
+> **Before you read this.** I am not claiming any authority on this topic. This blog and the accompanying demo are both mostly written by AI. I have reviewed the code and the blog for sure, yet you may still find errors or omissions. I didn't aim to build a fully-featured production-grade solution; it is just a demo I've put together to better understand the agent sandbox and how you can wrap enterprise security controls around it. You will not see an extensive RAG pipeline, or complex agent logic, or any evaluation, guardrails or monitoring built around it (which you should consider).
 
 Sooner or later someone is going to ask your platform team to run AI agents in
 production, if they haven't done already. Not a chatbot — agents: things that hold credentials, query databases,
@@ -19,9 +19,11 @@ question that lands on infrastructure is not "which model" but a much older one:
 
 The uncomfortable answer, in most agent frameworks today, is a paragraph of English
 in a system prompt. *You must not access customer records. Do not run code unless
-asked.* That is a request, not a control. It sits in the same channel as the
-attacker's input, it has no audit trail, and there is nothing to point a security
-reviewer at. You can try adding guardrails before and after and during the calls etc, but with the complexity and cost of these extra layers, it's not always worth it or simply not manageable at scale.
+asked.* That is a request, not a control. It has no audit trail, there is nothing to point a
+security reviewer at, and it competes for the model's attention with whatever the
+user sent and whatever the retrieval step pulled in. Instructions and input do arrive
+as separate message roles, but the only thing weighing one against the other is the
+model — which is the component you were trying to constrain in the first place. You can try adding guardrails before and after and during the calls etc, but with the complexity and cost of these extra layers, it's not always worth it or simply not manageable at scale.
 
 [Agentic Meetings](https://github.com/erdincka/meetings) is a working demonstration
 of the alternative, built on [Kubernetes Agent
@@ -31,7 +33,7 @@ first-class API objects. The application on top is a multi-agent meeting simulat
 a supervisor picks who speaks next, and each participant argues from their
 organisational role over the company's documents. That part is an ordinary LLM demo.
 The part worth an infrastructure architect's time is underneath — every agent runs
-in its own kernel-isolated pod, and **what each one may do is a Kubernetes
+in its own gVisor-isolated sandbox, and **what each one may do is a Kubernetes
 authorisation decision**.
 
 This piece is about how it is put together and what it is like to operate. There is
@@ -76,19 +78,24 @@ load-bearing:
 |---|---|---|
 | Prompt | Only granted tools are registered | Honest mistakes |
 | Runtime | Grants intersected with a mounted capability list | A compromised backend over-granting |
-| Secret | Credentials mounted only into templates that need them | There is nothing to steal |
+| Secret | Credentials mounted only into templates that need them | Unneeded application credentials are absent |
 | NetworkPolicy | Default-deny egress per profile | A stolen credential being *used* |
 | RBAC | Only some ServiceAccounts may claim an exec sandbox | The agent itself |
 
 Read that bottom-up and it is a familiar defence-in-depth story. The top layer is
-the one every agent framework ships with, and on its own it is worth roughly
-nothing. The bottom two are ordinary Kubernetes objects that your cluster already
-knows how to enforce and your security team already knows how to audit.
+the one every agent framework ships with. It is genuinely useful for steering
+behaviour — it prevents accidental tool use and sets the default — but it is not a
+security boundary, because nothing below the model is obliged to honour it. The
+bottom two are ordinary Kubernetes objects that your cluster already knows how to
+enforce.
 
 That is the real argument for doing this on Kubernetes rather than inside an agent
 framework: **you are not inventing a permission system.** You are reusing the one
-that already governs everything else you run, with the tooling, the audit trail and
-the review process that comes with it.
+that already governs everything else you run, expressed in primitives your platform
+team can already reason about and wire into whatever authorization, policy and audit
+tooling they have. Kubernetes supplies the primitives and the API audit surface;
+whether those logs are retained, correlated and actually read is an organisational
+question, not something the design hands you.
 
 ## What it's like to use
 
@@ -196,9 +203,18 @@ validated by the API server, with identity read from pod labels rather than from
 request body the model composed.
 
 Model calls go the same way. Sandboxes never call the inference provider; they reach
-it through the backend's `/internal/v1/llm` proxy. So a persona sandbox needs no
-route off the cluster and holds no provider key — which also means the provider can
-sit behind a CDN with no stable address without any of it reaching NetworkPolicy.
+it through the backend's `/internal/v1/llm` proxy, so a persona sandbox holds no
+provider key and the provider can sit behind a CDN with no stable address.
+
+Be precise about what that egress policy does and does not do, because it is easy to
+overclaim. A persona sandbox has no *credential* for the provider and no route to the
+application database. It does still have outbound TCP on 443 and 6443 to any address,
+because the apiserver has to stay reachable: a network-level block would turn an RBAC
+refusal into a connection timeout, and a policy decision that looks like an outage is
+worse than useless. That is a deliberate trade of egress breadth for a legible denial,
+not an airtight egress boundary — a compromised sandbox could still open an HTTPS
+connection somewhere. Pinning the rule to the apiserver's own address would close
+that, and is the obvious next change.
 
 ### 5. Make the boundary legible from outside
 
@@ -239,9 +255,23 @@ gVisor is a strong boundary, not a perfect one. The five layers stop specific,
 enumerated things and the repo documents what each one measures. NetworkPolicy is
 only a control if your CNI enforces it — on a cluster where it does not, two of the
 five layers are decorative, and the preflight check says so rather than pretending
-otherwise. And none of this makes the *model* trustworthy; it makes the model's
-capabilities bounded and its refusals observable, which is a different and more
-achievable goal.
+otherwise.
+
+The backend is the part to be most honest about. It is not *assumed* trustworthy:
+a compromised backend still cannot grant a persona more than its sandbox template
+already provisions, because the runtime intersects what the backend asks for with
+the capability list mounted into the pod. But it owns the conversation state, the
+database credential, the orchestration and the model proxy, so compromising it
+remains a serious event. What this design contains is untrusted *agent* execution.
+It does not make the application as a whole compromise-resistant, and it trusts the
+Kubernetes control plane outright.
+
+Which is the honest version of the tagline. The cluster does not make the model
+trustworthy, and it has nothing to say about what the model concludes, what it
+emits, or what it is talked into by something it retrieved. It moves a specific set
+of capability decisions below the model, into infrastructure that answers the same
+way whether or not the model cooperates. For those decisions — and only those — the
+model does not get the final say.
 
 ## Trying it
 
@@ -249,21 +279,32 @@ You need a cluster that can actually support the controls:
 
 | Requirement | Why |
 |---|---|
-| Kubernetes 1.31+ | `ImageVolume`, the mechanism this demo uses to deliver pgvector |
+| Kubernetes 1.34+ | `ImageVolume` for pgvector, and the floor CloudNativePG 1.30 supports |
 | A RuntimeClass with kernel-level isolation | The boundary the design rests on |
 | Agent Sandbox v0.5.6+ | The `Sandbox` / `SandboxClaim` / `SandboxTemplate` API |
 | CloudNativePG 1.30+ | Postgres 18 with pgvector as a declarative extension |
 | Gateway API + a live GatewayClass | The WebSocket upgrade the transcript needs |
 | A CNI that **enforces** NetworkPolicy | Two of the five enforcement layers |
 
-`ImageVolume` deserves a footnote, because it is a choice rather than a law.
-It is how *this* demo gets pgvector into Postgres: the extension is mounted from
-an OCI image, so its version is a value in the cluster manifest instead of a
-Dockerfile you own and have to rebuild. It is beta and on by default from
-Kubernetes 1.33; on 1.31 and 1.32 you need the feature gate enabled on both the
-kubelet and the apiserver. If you would rather bake pgvector into a Postgres
-image the conventional way, that is a perfectly good route — you would just be
-changing the deployment, because this repo ships the one mechanism.
+That version floor deserves a footnote, because two things set it and neither is
+obvious.
+
+`ImageVolume` is how *this* demo gets pgvector into Postgres: the extension is
+mounted from an OCI image, so its version is a value in the cluster manifest instead
+of a Dockerfile you own and have to rebuild. It went alpha in Kubernetes 1.32 behind
+a feature gate, beta and on by default in 1.33, and by 1.35 the gate is gone. So on
+its own it would put the floor at 1.33.
+
+CloudNativePG raises it. Version 1.30 lists Kubernetes 1.34, 1.35 and 1.36 as
+supported; 1.31 through 1.33 are tested but explicitly not supported. Taking the
+higher of the two, **1.34+** is the version to build against — and if you read an
+earlier draft of this post or the repository saying 1.31+, that was wrong, and it is
+the kind of number worth checking rather than inheriting.
+
+None of this is load-bearing for the architecture. If you would rather bake pgvector
+into a Postgres image the conventional way, that is a perfectly good route and it
+relaxes the Kubernetes floor considerably — you would just be changing the
+deployment, because this repo ships the one mechanism.
 
 Then:
 
