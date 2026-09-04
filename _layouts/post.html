@@ -12,15 +12,10 @@ layout: default
       </span>
       {%- endif %}
     </p>
-    {%- if page.summary %}<p class="summary">{{ page.summary }}</p>{% endif %}
+    {%- assign blurb = page.description | default: page.summary -%}
+    {%- if blurb %}<p class="summary">{{ blurb }}</p>{% endif %}
   </header>
 
-  {%- if page.disclaimer %}
-  <aside class="disclaimer" role="note" aria-label="Disclaimer">
-    <p class="disclaimer-label">Before you read this</p>
-    {{ page.disclaimer | markdownify }}
-  </aside>
-  {%- endif %}
 
   {{ content }}
 

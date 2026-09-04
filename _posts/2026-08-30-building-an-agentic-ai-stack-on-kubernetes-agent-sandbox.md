@@ -2,17 +2,14 @@
 layout: post
 title: "Building an agentic AI stack on Kubernetes Agent Sandbox: what it's for and what it's like to use"
 date: 2026-08-30
-summary: >-
+tags: [kubernetes, ai, agents, security]
+description: >-
   Prompt-based restrictions are a request, not a control. What it takes to move
   agent permissions into Kubernetes, and what running it actually teaches you.
-tags: [kubernetes, ai, agents, security]
-disclaimer: >-
-  I am not claiming any authority on this topic. This blog and the accompanying demo are both mostly written
-  by AI. I have reviewed the code and the blog for sure, yet you may still find errors or omissions.
-  First of all, I didn't aim to build a fully-featured production-grade solution, it is just a demo I've
-  put together to better understand the agent sandbox and how you can wrap enterprise security controls around it. You will not
-  see an extensive RAG pipeline, or complex agent logic, or any evaluation, guardrails or monitoring built around it (which you should consider).
+image: /assets/img/social-card.png
 ---
+
+> **Before you read this.** I am not claiming any authority on this topic. This blog and the accompanying demo are both mostly written by AI. I have reviewed the code and the blog for sure, yet you may still find errors or omissions. First of all, I didn't aim to build a fully-featured production-grade solution, it is just a demo I've put together to better understand the agent sandbox and how you can wrap enterprise security controls around it. You will not see an extensive RAG pipeline, or complex agent logic, or any evaluation, guardrails or monitoring built around it (which you should consider).
 
 Sooner or later someone is going to ask your platform team to run AI agents in
 production, if they haven't done already. Not a chatbot — agents: things that hold credentials, query databases,
@@ -67,7 +64,7 @@ That last detail is a design choice worth copying. The denial is *reported, not
 raised*: the tool returns `DENIED_BY_CLUSTER: ...`, the agent absorbs it and carries
 on contributing to the meeting, and the refusal lands in the transcript and the
 audit matrix as a policy decision rather than a stack trace. A control that crashes
-the workload gets switched off within a week. A control that degrades it gracefully
+the workload gets switched off. A control that degrades it gracefully
 survives contact with users.
 
 ## Five layers, and the ones that matter
@@ -97,7 +94,7 @@ the review process that comes with it.
 
 You configure it, define who is in the room, and watch a meeting run.
 
-![The agent registry](/assets/img/agent-sandbox-roles.png)
+![The agent registry: nine personas, each with a department, a tone, a risk level and a set of granted tools](/assets/img/agent-sandbox-roles.png)
 
 Personas are data, edited in the UI: a role, a tone, a risk level, and a set of
 granted tools. The grant is the part with teeth — a persona's tool list resolves to
@@ -110,13 +107,16 @@ field" and "grant this agent the ability to execute code" were the same action.
 Start a meeting and the supervisor takes over: it picks a speaker, that persona's
 sandbox runs a turn, the utterance streams back over a WebSocket, and the events log
 records every routing decision beside the transcript. Ask the General Counsel
-persona to run a calculation and you get the demonstrable moment — a 403 from the
-API server, surfaced in the audit matrix.
+persona to run a calculation and, if the model reaches for the tool, you get the
+demonstrable moment — a 403 from the API server, surfaced in the audit matrix.
+Whether it reaches for the tool on any given turn is the model's decision, and
+smaller ones are inconsistent about it. The cluster's answer does not depend on
+that, which is the next thing to show.
 
 And you do not have to take the UI's word for it, which is the part that matters
 if you are the one signing off on this. The same decision is one command away:
 
-![Verifying enforcement against a live cluster](/assets/img/agent-sandbox-enforcement.png)
+![A terminal session against a live cluster: /proc/version reports a gVisor kernel, each persona pod runs under its own ServiceAccount, and kubectl auth can-i returns no for the General Counsel and yes for the Finance Director](/assets/img/agent-sandbox-enforcement.png)
 
 Three things there are worth separating. `/proc/version` returning
 `4.19.0-gvisor` proves the kernel boundary is real rather than a silent fallback
@@ -130,7 +130,7 @@ have to trust the app's audit matrix, or reason about whether a model could be
 talked out of its instructions. They can ask the API server directly, the same
 way they would for any other workload on the cluster.
 
-![A concluded meeting](/assets/img/agent-sandbox-conclusion.png)
+![A concluded meeting: notes, agreed actions and identified resource gaps, rather than only a transcript](/assets/img/agent-sandbox-conclusion.png)
 
 Meetings end with a decision record — notes, agreed actions, identified gaps —
 rather than just a transcript.
@@ -249,12 +249,21 @@ You need a cluster that can actually support the controls:
 
 | Requirement | Why |
 |---|---|
-| Kubernetes 1.31+ | `ImageVolume`, which is how pgvector reaches Postgres |
+| Kubernetes 1.31+ | `ImageVolume`, the mechanism this demo uses to deliver pgvector |
 | A RuntimeClass with kernel-level isolation | The boundary the design rests on |
 | Agent Sandbox v0.5.6+ | The `Sandbox` / `SandboxClaim` / `SandboxTemplate` API |
 | CloudNativePG 1.30+ | Postgres 18 with pgvector as a declarative extension |
 | Gateway API + a live GatewayClass | The WebSocket upgrade the transcript needs |
 | A CNI that **enforces** NetworkPolicy | Two of the five enforcement layers |
+
+`ImageVolume` deserves a footnote, because it is a choice rather than a law.
+It is how *this* demo gets pgvector into Postgres: the extension is mounted from
+an OCI image, so its version is a value in the cluster manifest instead of a
+Dockerfile you own and have to rebuild. It is beta and on by default from
+Kubernetes 1.33; on 1.31 and 1.32 you need the feature gate enabled on both the
+kubelet and the apiserver. If you would rather bake pgvector into a Postgres
+image the conventional way, that is a perfectly good route — you would just be
+changing the deployment, because this repo ships the one mechanism.
 
 Then:
 

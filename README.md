@@ -11,8 +11,9 @@ Add a Markdown file to `_posts/` named `YYYY-MM-DD-slug.md`:
 layout: post
 title: The title, in sentence case
 date: 2026-08-29
-summary: One sentence shown on the home page and in search results.
+description: One sentence shown on the home page, in link previews and in search results.
 tags: [kubernetes, ai]
+image: /assets/img/social-card.png   # optional, 1200x675, used for link previews
 ---
 
 Body goes here.

@@ -13,7 +13,8 @@ layout: default
     <li>
       <time datetime="{{ post.date | date_to_xmlschema }}">{{ post.date | date: "%b %Y" }}</time>
       <a href="{{ post.url | relative_url }}">{{ post.title }}</a>
-      {%- if post.summary %}<p>{{ post.summary }}</p>{% endif %}
+      {%- assign blurb = post.description | default: post.summary -%}
+      {%- if blurb %}<p>{{ blurb }}</p>{% endif %}
     </li>
     {%- endfor %}
   </ul>
