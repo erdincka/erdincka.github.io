@@ -9,7 +9,17 @@ description: >-
 image: /assets/img/social-card.png
 ---
 
-> **Before you read this.** I am not claiming any authority on this topic. This blog and the accompanying demo are both mostly written by AI. I have reviewed the code and the blog for sure, yet you may still find errors or omissions. I didn't aim to build a fully-featured production-grade solution; it is just a demo I've put together to better understand the agent sandbox and how you can wrap enterprise security controls around it. You will not see an extensive RAG pipeline, or complex agent logic, or any evaluation, guardrails or monitoring built around it (which you should consider).
+> **Before you read this.** This is an engineering demo, not a production reference
+> architecture. I used AI extensively while building and documenting it, but I
+> reviewed the implementation and, importantly, validated the security claims against
+> a running Kubernetes cluster. The repository ships the verification commands and the
+> failure modes I hit, so the claims can be checked rather than taken on trust.
+>
+> It deliberately does not try to solve every part of a production agent platform.
+> There is no elaborate retrieval pipeline, no model evaluation framework, no
+> comprehensive guardrail system and no production-grade observability stack. The goal
+> is narrower: to show how Kubernetes primitives can enforce selected agent
+> capabilities independently of the model.
 
 Sooner or later someone is going to ask your platform team to run AI agents in
 production, if they haven't done already. Not a chatbot — agents: things that hold credentials, query databases,
@@ -68,6 +78,29 @@ on contributing to the meeting, and the refusal lands in the transcript and the
 audit matrix as a policy decision rather than a stack trace. A control that crashes
 the workload gets switched off. A control that degrades it gracefully
 survives contact with users.
+
+## What this is, and is not, trying to protect
+
+The boundary here is deliberately narrow, so it is worth stating before the
+mechanics.
+
+The model is treated as unreliable. It may be wrong, it may follow instructions
+buried in something it retrieved, and it may reach for a capability its persona was
+never granted. The goal is that a specific set of capabilities is enforced *below*
+it — by Kubernetes authorization, workload isolation, mounted credentials and
+network policy — so that whether it cooperates stops being the deciding factor.
+
+| Threat | Addressed here? |
+|---|---|
+| Model reaches for a tool it was not granted | Yes, by RBAC at the apiserver |
+| Model-authored code tries to reach the database | Yes, where the CNI enforces NetworkPolicy |
+| Persona needs a credential it was not given | Yes — it is not mounted |
+| Agent escapes its sandbox | Mitigated by gVisor, not eliminated |
+| Backend is compromised | Partly: it cannot over-grant, but it is still highly trusted |
+| Kubernetes control plane is compromised | No |
+
+Everything below is about the first three rows. The last two are the honest limits,
+and I come back to them at the end.
 
 ## Five layers, and the ones that matter
 
@@ -142,11 +175,9 @@ way they would for any other workload on the cluster.
 Meetings end with a decision record — notes, agreed actions, identified gaps —
 rather than just a transcript.
 
-## Six decisions an infrastructure architect will care about
+## "Installed" and "working" are different questions
 
-### 1. "Installed" and "working" are different questions
-
-This is the transferable lesson, and the project hit it at four separate layers.
+This is the transferable lesson, and the project hit it at five separate layers.
 
 A misconfigured `RuntimeClass` handler **does not fail loudly** — on several
 container runtimes, containerd silently falls back to `runc`. The pod is green,
@@ -155,8 +186,10 @@ to one that enforces it: the policies apply cleanly, `kubectl get networkpolicy`
 reassuring, and nothing is blocked. On kind's default CNI, a supposedly-restricted
 persona reached Postgres on five consecutive attempts while the security model
 claimed the opposite. Gateway API CRDs can be present with no controller watching
-them. And an internal API router can be written, reviewed, unit-tested and never
-mounted.
+them — Gateway API is a specification, and installing its CRDs gives you no
+controller and no dataplane. An internal API router can be written, reviewed,
+unit-tested and never mounted. And, as above, an egress rule can name a port when
+you believed it named a destination.
 
 Each of those presents as a healthy deployment. The habit that falls out is
 **provoke the behaviour and observe what happens** — not "is the object present",
@@ -165,9 +198,9 @@ requirements that can be present and inert, whether the thing actually functions
 Isolation is verified by reading `/proc/version` inside a running sandbox, never by
 a readiness check.
 
-If you take one thing from this project into your own environment, take that.
+## Five decisions an infrastructure architect will care about
 
-### 2. Keep the orchestration graph in one place
+### 1. Keep the orchestration graph in one place
 
 It is tempting to distribute the agent graph across the sandboxes. Don't. Sandboxes
 here are **turn executors, not graph participants**: the backend owns the graph and
@@ -178,7 +211,7 @@ individual tool calls back cost a network round trip *per tool call* and turned 
 demo into a distributed-systems project. Distributed checkpointing across untrusted
 pods is a research problem; it is not a prerequisite for isolating agents.
 
-### 3. Size the warm pool by concurrent speakers, not attendees
+### 2. Size the warm pool by concurrent speakers, not attendees
 
 gVisor pods are not fast to start, so both tiers are warm-pooled. Two operational
 details:
@@ -191,10 +224,10 @@ details:
 
 Budget roughly **8 CPU and 16 GiB allocatable** for a full demo, most of it warm
 pool sitting idle. It runs smaller by reducing warm replicas, at the cost of a
-several-second pause the first time each persona speaks. That is the trade to have
-in hand before someone asks why idle pods are burning quota.
+several-second pause the first time each persona speaks — worth knowing before
+someone asks why idle pods are consuming quota.
 
-### 4. Decide what a sandbox never holds
+### 3. Decide what a sandbox never holds
 
 The rule here is absolute: **sandboxes never hold the application database
 credential.** Everything a persona needs arrives through a scoped internal API on
@@ -206,17 +239,24 @@ Model calls go the same way. Sandboxes never call the inference provider; they r
 it through the backend's `/internal/v1/llm` proxy, so a persona sandbox holds no
 provider key and the provider can sit behind a CDN with no stable address.
 
-Be precise about what that egress policy does and does not do, because it is easy to
-overclaim. A persona sandbox has no *credential* for the provider and no route to the
-application database. It does still have outbound TCP on 443 and 6443 to any address,
-because the apiserver has to stay reachable: a network-level block would turn an RBAC
-refusal into a connection timeout, and a policy decision that looks like an outage is
-worse than useless. That is a deliberate trade of egress breadth for a legible denial,
-not an airtight egress boundary — a compromised sandbox could still open an HTTPS
-connection somewhere. Pinning the rule to the apiserver's own address would close
-that, and is the obvious next change.
+Which was almost the neatest example in this whole piece of a control that reads as
+closed and is not. Until recently that policy allowed `0.0.0.0/0` on TCP 443 and
+6443, because the apiserver has to stay reachable — block it at the network and an
+RBAC refusal becomes a connection timeout, which is worse than no control at all. But
+443 is the whole HTTPS internet. The rule was a *port* restriction wearing the
+costume of a destination one, and the comment beside it cheerfully claimed the
+sandbox had no path off the cluster.
 
-### 5. Make the boundary legible from outside
+It does now. The policy is pinned to the apiserver's own addresses — both the Service
+ClusterIP and the real endpoints, because whether a NetworkPolicy implementation
+matches one or the other depends on which side of DNAT it evaluates. A sandbox still
+reaches the apiserver on the ClusterIP; a connection to `1.1.1.1:443` is now refused.
+
+I mention it rather than quietly fixing it because it is the same failure this post
+keeps circling: not a control that was missing, but one that was present, plausible,
+and broader than its own documentation said.
+
+### 4. Make the boundary legible from outside
 
 Telemetry is optional here and off by default, on the grounds that observability
 must never be why a system fails to start. When it is on, a single `traceparent` is
@@ -233,7 +273,7 @@ persona's *profile*, never its agent id — and **denials are counted separately
 errors**, because collapsing them would hide the one signal the project exists to
 surface.
 
-### 6. Deploys that report success and change nothing
+### 5. Deploys that report success and change nothing
 
 Images are tagged by content digest, not `:latest`. A mutable tag leaves the
 Deployment spec unchanged when the image is rebuilt, so `helm upgrade` finds nothing
