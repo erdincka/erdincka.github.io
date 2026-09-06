@@ -107,7 +107,7 @@ article.post blockquote {
   color: var(--muted);
 }
 
-img { max-width: 100%; height: auto; border-radius: 5px; }
+img, video { max-width: 100%; height: auto; border-radius: 5px; }
 figure { margin: 1.8rem 0; }
 figcaption { color: var(--muted); font-size: .88rem; margin-top: .5rem; }
 
